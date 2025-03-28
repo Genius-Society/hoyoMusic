@@ -1,0 +1,6 @@
+__pycache__/*
+output/*
+rename.sh
+test.py
+gpt2-abcmusic/*
+test.ipynb

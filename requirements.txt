@@ -1,0 +1,10 @@
+torch==2.3.1+cu118
+-f https://mirrors.aliyun.com/pytorch-wheels/cu118
+modelscope[framework]==1.18.1
+transformers==4.23
+samplings==0.1.7
+datasets==2.18
+numpy==1.26.4
+pillow==9.4
+unidecode
+-i https://pypi.tuna.tsinghua.edu.cn/simple
