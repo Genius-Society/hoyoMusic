@@ -13,8 +13,18 @@ conda activate hoyo
 pip install -r requirements.txt
 ```
 
-## Maintenance
+## Code download
 ```bash
 git clone git@github.com:Genius-Society/hoyoMusic.git
 cd hoyoMusic
 ```
+
+## Train
+```bash
+python train.py # fine-tune model
+python plot.py # plot training result
+```
+
+## Thanks
+- [HoYoverse](https://www.hoyoverse.com/en-us/about-us)
+- [Tunesformer](https://github.com/sander-wood/tunesformer)
