@@ -154,6 +154,7 @@ def train(weights_url=WEIGHT_URL):
         f"Genius-Society/{DATASET}",
         subset_name="default",
         cache_dir="./__pycache__",
+        trust_remote_code=True,
     )
     trainset, evalset = [], []
     classes = dataset["test"].features["label"].names
@@ -212,11 +213,11 @@ def train(weights_url=WEIGHT_URL):
         if not os.path.exists(WEIGHT_PATH):
             download(url=weights_url)
 
-        checkpoint = torch.load(WEIGHT_PATH)
+        checkpoint = torch.load(WEIGHT_PATH, weights_only=False)
         if torch.cuda.device_count() > 1:
-            model.module.load_state_dict(checkpoint["model"])
+            model.module.load_state_dict(checkpoint["model"], strict=False)
         else:
-            model.load_state_dict(checkpoint["model"])
+            model.load_state_dict(checkpoint["model"], strict=False)
 
         optimizer.load_state_dict(checkpoint["optimizer"])
         lr_scheduler.load_state_dict(checkpoint["lr_sched"])
