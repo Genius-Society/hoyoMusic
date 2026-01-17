@@ -8,8 +8,8 @@ miHoYo game style music generation
 
 ## Environment
 ```bash
-conda create -n hoyo python=3.11 -y
-conda activate hoyo
+conda create -n py311 python=3.11 -y
+conda activate py311
 pip install -r requirements.txt
 ```
 
