@@ -1,5 +1,8 @@
-*__pycache__*
+__pycache__/*
 output/*
 rename.sh
-test.*
+test.py
 gpt2-abcmusic/*
+*.pth
+flagged/*
+mscore3/*

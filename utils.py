@@ -1,28 +1,89 @@
 import os
-import re
+import sys
+import time
 import torch
-import random
 import requests
-from config import *
+import subprocess
 from tqdm import tqdm
-from unidecode import unidecode
-from torch.utils.data import Dataset
-from transformers import GPT2Model, GPT2LMHeadModel, PreTrainedModel
-from samplings import top_p_sampling, top_k_sampling, temperature_sampling
 
-os.environ["MODELSCOPE_LOG_LEVEL"] = "40"
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+EN_US = os.getenv("LANG") != "zh_CN.UTF-8"
+
+ZH2EN = {
+    "Top-P 采样": "Top-P sample",
+    "Top-K 采样 (0 为关闭)": "Top-K sample (0=closed)",
+    "温度参数": "Temperature",
+    "地区风格": "Region",
+    "状态栏": "Status",
+    "音频": "Audio",
+    "下载 MIDI": "Download MIDI",
+    "下载 PDF 乐谱": "Download PDF",
+    "下载 MusicXML": "Download MusicXML",
+    "下载 MXL": "Download MXL",
+    "ABC 记谱": "ABC notation",
+    "五线谱": "Staff",
+    "原神音乐生成": "Genshin Music Generation",
+    """
+    欢迎使用此创空间, 此创空间基于 Tunesformer 开源项目制作，完全免费。当前模型还在调试中，计划在原神主线杀青后，所有国家地区角色全部开放后，二创音乐会齐全且样本均衡，届时重新微调模型并添加现实风格筛选辅助游戏各国家输出强化学习，以提升输出区分度与质量。注：崩铁方面数据工程正在运作中，未来也希望随主线杀青而基线化。<br>
+    数据来源: <a href="https://musescore.org">MuseScore</a> 标签来源: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> 模型基础: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>
+    """: """
+    Welcome to this space based on the Tunesformer open source project, which is totally free! The current model is still in debugging, the plan is in the Genshin Impact after the main line is killed, all countries and regions after all the characters are open, the second creation of the concert will be complete and the sample is balanced, at that time to re-fine-tune the model and add the reality of the style of screening to assist in the game of each country's output to strengthen the learning in order to enhance the output differentiation and quality. Note: Data engineering on the Star Rail is in operation, and will hopefully be baselined in the future as well with the mainline kill.<br>
+    Data source: <a href="https://musescore.org">MuseScore</a> Tags source: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> Model base: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>
+    """,
+}
 
 
-def download(url=WEIGHT_URL, filename=WEIGHT_PATH):
-    os.makedirs(OUTPUT_PATH, exist_ok=True)
+def _L(zh_txt: str):
+    return ZH2EN[zh_txt] if EN_US else zh_txt
+
+
+TEYVAT = {
+    "蒙德": "Mondstadt",
+    "璃月": "Liyue",
+    "稻妻": "Inazuma",
+    "须弥": "Sumeru",
+    "枫丹": "Fontaine",
+    "纳塔": "Teyvat",
+}
+
+if EN_US:
+    import huggingface_hub
+
+    WEIGHTS_PATH = (
+        huggingface_hub.snapshot_download(
+            "Genius-Society/hoyoMusic",
+            cache_dir="./__pycache__",
+        )
+        + "/weights.pth"
+    )
+
+else:
+    import modelscope
+
+    WEIGHTS_PATH = (
+        modelscope.snapshot_download(
+            "Genius-Society/hoyoMusic",
+            cache_dir="./__pycache__",
+        )
+        + "/weights.pth"
+    )
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+TEMP_DIR = "./__pycache__/tmp"
+PATCH_LENGTH = 128  # Patch Length
+PATCH_SIZE = 32  # Patch Size
+PATCH_NUM_LAYERS = 9  # Number of layers in the encoder
+CHAR_NUM_LAYERS = 3  # Number of layers in the decoder
+PATCH_SAMPLING_BATCH_SIZE = 0  # Batchsize for patch during training, 0=full context
+SHARE_WEIGHTS = False  # Whether to share weights between the encoder and decoder
+
+
+def download(filename: str, url: str):
     try:
         response = requests.get(url, stream=True)
         total_size = int(response.headers.get("content-length", 0))
         chunk_size = 1024
-
         with open(filename, "wb") as file, tqdm(
-            desc=f"Downloading {filename} to from {url}...",
+            desc=f"Downloading {filename} from '{url}'...",
             total=total_size,
             unit="B",
             unit_scale=True,
@@ -33,357 +94,26 @@ def download(url=WEIGHT_URL, filename=WEIGHT_PATH):
                 bar.update(size)
 
     except Exception as e:
-        print(f"Failed to download weights: {e}")
-        exit()
-
-
-class Patchilizer:
-    """
-    A class for converting music bars to patches and vice versa.
-    """
-
-    def __init__(self):
-        self.delimiters = ["|:", "::", ":|", "[|", "||", "|]", "|"]
-        self.regexPattern = f"({'|'.join(map(re.escape, self.delimiters))})"
-        self.pad_token_id = 0
-        self.bos_token_id = 1
-        self.eos_token_id = 2
-
-    def split_bars(self, body):
-        """
-        Split a body of music into individual bars.
-        """
-        bars = re.split(self.regexPattern, "".join(body))
-        bars = list(filter(None, bars))
-        # remove empty strings
-        if bars[0] in self.delimiters:
-            bars[1] = bars[0] + bars[1]
-            bars = bars[1:]
-
-        bars = [bars[i * 2] + bars[i * 2 + 1] for i in range(len(bars) // 2)]
-        return bars
-
-    def bar2patch(self, bar, patch_size=PATCH_SIZE):
-        """
-        Convert a bar into a patch of specified length.
-        """
-        patch = [self.bos_token_id] + [ord(c) for c in bar] + [self.eos_token_id]
-        patch = patch[:patch_size]
-        patch += [self.pad_token_id] * (patch_size - len(patch))
-        return patch
-
-    def patch2bar(self, patch):
-        """
-        Convert a patch into a bar.
-        """
-        return "".join(
-            chr(idx) if idx > self.eos_token_id else ""
-            for idx in patch
-            if idx != self.eos_token_id
-        )
-
-    def encode(
-        self,
-        abc_code,
-        patch_length=PATCH_LENGTH,
-        patch_size=PATCH_SIZE,
-        add_special_patches=False,
-    ):
-        """
-        Encode music into patches of specified length.
-        """
-        lines = unidecode(abc_code).split("\n")
-        lines = list(filter(None, lines))  # remove empty lines
-
-        body = ""
-        patches = []
-
-        for line in lines:
-            if len(line) > 1 and (
-                (line[0].isalpha() and line[1] == ":") or line.startswith("%%score")
-            ):
-                if body:
-                    bars = self.split_bars(body)
-                    patches.extend(
-                        self.bar2patch(
-                            bar + "\n" if idx == len(bars) - 1 else bar, patch_size
-                        )
-                        for idx, bar in enumerate(bars)
-                    )
-                    body = ""
-
-                patches.append(self.bar2patch(line + "\n", patch_size))
-
-            else:
-                body += line + "\n"
-
-        if body:
-            patches.extend(
-                self.bar2patch(bar, patch_size) for bar in self.split_bars(body)
-            )
-
-        if add_special_patches:
-            bos_patch = [self.bos_token_id] * (patch_size - 1) + [self.eos_token_id]
-            eos_patch = [self.bos_token_id] + [self.eos_token_id] * (patch_size - 1)
-            patches = [bos_patch] + patches + [eos_patch]
-
-        return patches[:patch_length]
-
-    def decode(self, patches):
-        """
-        Decode patches into music.
-        """
-        return "".join(self.patch2bar(patch) for patch in patches)
-
-
-class PatchLevelDecoder(PreTrainedModel):
-    """
-    An Patch-level Decoder model for generating patch features in an auto-regressive manner.
-    It inherits PreTrainedModel from transformers.
-    """
-
-    def __init__(self, config):
-        super().__init__(config)
-        self.patch_embedding = torch.nn.Linear(PATCH_SIZE * 128, config.n_embd)
-        torch.nn.init.normal_(self.patch_embedding.weight, std=0.02)
-        self.base = GPT2Model(config)
-
-    def forward(self, patches: torch.Tensor) -> torch.Tensor:
-        """
-        The forward pass of the patch-level decoder model.
-        :param patches: the patches to be encoded
-        :return: the encoded patches
-        """
-        patches = torch.nn.functional.one_hot(patches, num_classes=128).float()
-        patches = patches.reshape(len(patches), -1, PATCH_SIZE * 128)
-        patches = self.patch_embedding(patches.to(self.device))
-
-        return self.base(inputs_embeds=patches)
-
-
-class CharLevelDecoder(PreTrainedModel):
-    """
-    A Char-level Decoder model for generating the characters within each bar patch sequentially.
-    It inherits PreTrainedModel from transformers.
-    """
-
-    def __init__(self, config):
-        super().__init__(config)
-        self.pad_token_id = 0
-        self.bos_token_id = 1
-        self.eos_token_id = 2
-        self.base = GPT2LMHeadModel(config)
-
-    def forward(
-        self,
-        encoded_patches: torch.Tensor,
-        target_patches: torch.Tensor,
-        patch_sampling_batch_size: int,
-    ):
-        """
-        The forward pass of the char-level decoder model.
-        :param encoded_patches: the encoded patches
-        :param target_patches: the target patches
-        :return: the decoded patches
-        """
-        # preparing the labels for model training
-        target_masks = target_patches == self.pad_token_id
-        labels = target_patches.clone().masked_fill_(target_masks, -100)
-
-        # masking the labels for model training
-        target_masks = torch.ones_like(labels)
-        target_masks = target_masks.masked_fill_(labels == -100, 0)
-
-        # select patches
-        if (
-            patch_sampling_batch_size != 0
-            and patch_sampling_batch_size < target_patches.shape[0]
-        ):
-            indices = list(range(len(target_patches)))
-            random.shuffle(indices)
-            selected_indices = sorted(indices[:patch_sampling_batch_size])
-
-            target_patches = target_patches[selected_indices, :]
-            target_masks = target_masks[selected_indices, :]
-            encoded_patches = encoded_patches[selected_indices, :]
-            labels = labels[selected_indices, :]
-
-        # get input embeddings
-        inputs_embeds = torch.nn.functional.embedding(
-            target_patches, self.base.transformer.wte.weight
-        )
-
-        # concatenate the encoded patches with the input embeddings
-        inputs_embeds = torch.cat(
-            (encoded_patches.unsqueeze(1), inputs_embeds[:, 1:, :]), dim=1
-        )
-
-        return self.base(
-            inputs_embeds=inputs_embeds, attention_mask=target_masks, labels=labels
-        )
-
-    def generate(self, encoded_patch: torch.Tensor, tokens: torch.Tensor):
-        """
-        The generate function for generating a patch based on the encoded patch and already generated tokens.
-        :param encoded_patch: the encoded patch
-        :param tokens: already generated tokens in the patch
-        :return: the probability distribution of next token
-        """
-        encoded_patch = encoded_patch.reshape(1, 1, -1)
-        tokens = tokens.reshape(1, -1)
-
-        # Get input embeddings
-        tokens = torch.nn.functional.embedding(tokens, self.base.transformer.wte.weight)
-
-        # Concatenate the encoded patch with the input embeddings
-        tokens = torch.cat((encoded_patch, tokens[:, 1:, :]), dim=1)
-
-        # Get output from model
-        outputs = self.base(inputs_embeds=tokens)
-
-        # Get probabilities of next token
-        probs = torch.nn.functional.softmax(outputs.logits.squeeze(0)[-1], dim=-1)
-
-        return probs
-
-
-class TunesFormer(PreTrainedModel):
-    """
-    TunesFormer is a hierarchical music generation model based on bar patching.
-    It includes a patch-level decoder and a character-level decoder.
-    It inherits PreTrainedModel from transformers.
-    """
-
-    def __init__(self, encoder_config, decoder_config, share_weights=False):
-        super().__init__(encoder_config)
-        self.pad_token_id = 0
-        self.bos_token_id = 1
-        self.eos_token_id = 2
-        if share_weights:
-            max_layers = max(
-                encoder_config.num_hidden_layers, decoder_config.num_hidden_layers
-            )
-
-            max_context_size = max(encoder_config.max_length, decoder_config.max_length)
-
-            max_position_embeddings = max(
-                encoder_config.max_position_embeddings,
-                decoder_config.max_position_embeddings,
-            )
-
-            encoder_config.num_hidden_layers = max_layers
-            encoder_config.max_length = max_context_size
-            encoder_config.max_position_embeddings = max_position_embeddings
-            decoder_config.num_hidden_layers = max_layers
-            decoder_config.max_length = max_context_size
-            decoder_config.max_position_embeddings = max_position_embeddings
-
-        self.patch_level_decoder = PatchLevelDecoder(encoder_config)
-        self.char_level_decoder = CharLevelDecoder(decoder_config)
-
-        if share_weights:
-            self.patch_level_decoder.base = self.char_level_decoder.base.transformer
-
-    def forward(
-        self,
-        patches: torch.Tensor,
-        patch_sampling_batch_size: int = PATCH_SAMPLING_BATCH_SIZE,
-    ):
-        """
-        The forward pass of the TunesFormer model.
-        :param patches: the patches to be both encoded and decoded
-        :return: the decoded patches
-        """
-        patches = patches.reshape(len(patches), -1, PATCH_SIZE)
-        encoded_patches = self.patch_level_decoder(patches)["last_hidden_state"]
-
-        return self.char_level_decoder(
-            encoded_patches.squeeze(0)[:-1, :],
-            patches.squeeze(0)[1:, :],
-            patch_sampling_batch_size,
-        )
-
-    def norm(self, prob):
-        prob = [float(x) for x in prob]
-        s = sum(prob)
-        if s == 0:
-            raise ValueError("全零概率")
-
-        return [x / s for x in prob]
-
-    def generate(
-        self,
-        patches: torch.Tensor,
-        tokens: torch.Tensor,
-        top_p: float = 1,
-        top_k: int = 0,
-        temperature: float = 1,
-        seed: int = None,
-    ):
-        """
-        The generate function for generating patches based on patches.
-        :param patches: the patches to be encoded
-        :return: the generated patches
-        """
-        patches = patches.reshape(len(patches), -1, PATCH_SIZE)
-        encoded_patches = self.patch_level_decoder(patches)["last_hidden_state"]
-
-        if tokens == None:
-            tokens = torch.tensor([self.bos_token_id], device=self.device)
-
-        generated_patch = []
-        random.seed(seed)
-
-        while True:
-            if seed != None:
-                n_seed = random.randint(0, 1000000)
-                random.seed(n_seed)
-
-            else:
-                n_seed = None
-
-            prob = (
-                self.char_level_decoder.generate(encoded_patches[0][-1], tokens)
-                .cpu()
-                .detach()
-                .numpy()
-            )
-
-            prob = top_p_sampling(prob, top_p=top_p, return_probs=True)
-            prob = top_k_sampling(prob, top_k=top_k, return_probs=True)
-            token = temperature_sampling(
-                self.norm(prob),
-                temperature=temperature,
-                seed=n_seed,
-            )
-
-            generated_patch.append(token)
-            if token == self.eos_token_id or len(tokens) >= PATCH_SIZE - 1:
-                break
-
-            else:
-                tokens = torch.cat(
-                    (tokens, torch.tensor([token], device=self.device)), dim=0
-                )
-
-        return generated_patch, n_seed
-
-
-class PatchilizedData(Dataset):
-    def __init__(self, items, patchilizer):
-        self.texts = []
-
-        for item in tqdm(items):
-            text = item["control code"] + "\n".join(
-                item["abc notation"].split("\n")[1:]
-            )
-            input_patch = patchilizer.encode(text, add_special_patches=True)
-            input_patch = torch.tensor(input_patch)
-            if torch.sum(input_patch) != 0:
-                self.texts.append(input_patch)
-
-    def __len__(self):
-        return len(self.texts)
-
-    def __getitem__(self, idx):
-        return self.texts[idx]
+        print(f"Error: {e}, retrying...")
+        time.sleep(10)
+        download(filename, url)
+
+
+if sys.platform.startswith("linux"):
+    apkname = "MuseScore.AppImage"
+    extra_dir = "squashfs-root"
+    download(
+        filename=apkname,
+        url="https://www.modelscope.cn/studio/Genius-Society/piano_trans/resolve/master/MuseScore.AppImage",
+    )
+    if not os.path.exists(extra_dir):
+        subprocess.run(["chmod", "+x", f"./{apkname}"])
+        subprocess.run([f"./{apkname}", "--appimage-extract"])
+
+    MSCORE = f"./{extra_dir}/AppRun"
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+else:
+    MSCORE = os.getenv("mscore")
+    if not MSCORE:
+        raise EnvironmentError("请配置好 mscore 环境变量!")

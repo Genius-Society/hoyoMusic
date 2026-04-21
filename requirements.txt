@@ -1,7 +1,5 @@
-datasets
-matplotlib
-modelscope[framework]
+music21
+pymupdf
 samplings==0.1.7
-torch
 transformers
 unidecode
