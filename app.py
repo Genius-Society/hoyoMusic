@@ -245,4 +245,4 @@ if __name__ == "__main__":
     数据来源: <a href="https://musescore.org">MuseScore</a> 标签来源: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> 模型基础: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>
     """
         ),
-    ).launch(css="#gradio-share-link-button-0 { display: none; }")
+    ).launch(css="#gradio-share-link-button-0 { display: none; }", ssr_mode=False)
