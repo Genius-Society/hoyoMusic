@@ -1,10 +1,8 @@
 import os
 import sys
-import time
 import torch
-import requests
+import shutil
 import subprocess
-from tqdm import tqdm
 
 EN_US = os.getenv("LANG") != "zh_CN.UTF-8"
 
@@ -22,13 +20,7 @@ ZH2EN = {
     "ABC 记谱": "ABC notation",
     "五线谱": "Staff",
     "原神音乐生成": "Genshin Music Generation",
-    """
-    欢迎使用此创空间, 此创空间基于 Tunesformer 开源项目制作，完全免费。当前模型还在调试中，计划在原神主线杀青后，所有国家地区角色全部开放后，二创音乐会齐全且样本均衡，届时重新微调模型并添加现实风格筛选辅助游戏各国家输出强化学习，以提升输出区分度与质量。注：崩铁方面数据工程正在运作中，未来也希望随主线杀青而基线化。<br>
-    数据来源: <a href="https://musescore.org">MuseScore</a> 标签来源: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> 模型基础: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>
-    """: """
-    Welcome to this space based on the Tunesformer open source project, which is totally free! The current model is still in debugging, the plan is in the Genshin Impact after the main line is killed, all countries and regions after all the characters are open, the second creation of the concert will be complete and the sample is balanced, at that time to re-fine-tune the model and add the reality of the style of screening to assist in the game of each country's output to strengthen the learning in order to enhance the output differentiation and quality. Note: Data engineering on the Star Rail is in operation, and will hopefully be baselined in the future as well with the mainline kill.<br>
-    Data source: <a href="https://musescore.org">MuseScore</a> Tags source: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> Model base: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>
-    """,
+    """欢迎使用此创空间, 此创空间基于 Tunesformer 开源项目制作，完全免费。当前模型还在调试中，计划在原神主线杀青后，所有国家地区角色全部开放后，二创音乐会齐全且样本均衡，届时重新微调模型并添加现实风格筛选辅助游戏各国家输出强化学习，以提升输出区分度与质量。注：崩铁方面数据工程正在运作中，未来也希望随主线杀青而基线化。<br>数据来源: <a href="https://musescore.org">MuseScore</a> 标签来源: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> 模型基础: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>""": """Welcome to this space based on the Tunesformer open source project, which is totally free! The current model is still in debugging, the plan is in the Genshin Impact after the main line is killed, all countries and regions after all the characters are open, the second creation of the concert will be complete and the sample is balanced, at that time to re-fine-tune the model and add the reality of the style of screening to assist in the game of each country's output to strengthen the learning in order to enhance the output differentiation and quality. Note: Data engineering on the Star Rail is in operation, and will hopefully be baselined in the future as well with the mainline kill.<br>Data source: <a href="https://musescore.org">MuseScore</a> Tags source: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> Model base: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>""",
 }
 
 
@@ -42,31 +34,26 @@ TEYVAT = {
     "稻妻": "Inazuma",
     "须弥": "Sumeru",
     "枫丹": "Fontaine",
-    "纳塔": "Teyvat",
+    "纳塔": "Teyvat",  # Coming soon
 }
 
 if EN_US:
     import huggingface_hub
 
-    WEIGHTS_PATH = (
-        huggingface_hub.snapshot_download(
-            "Genius-Society/hoyoMusic",
-            cache_dir="./__pycache__",
-        )
-        + "/weights.pth"
+    MODEL_DIR = huggingface_hub.snapshot_download(
+        "Genius-Society/hoyoMusic",
+        cache_dir="./__pycache__",
     )
 
 else:
     import modelscope
 
-    WEIGHTS_PATH = (
-        modelscope.snapshot_download(
-            "Genius-Society/hoyoMusic",
-            cache_dir="./__pycache__",
-        )
-        + "/weights.pth"
+    MODEL_DIR = modelscope.snapshot_download(
+        "Genius-Society/hoyoMusic",
+        cache_dir="./__pycache__",
     )
 
+WEIGHTS_PATH = f"{MODEL_DIR}/weights.pth"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TEMP_DIR = "./__pycache__/tmp"
 PATCH_LENGTH = 128  # Patch Length
@@ -77,35 +64,10 @@ PATCH_SAMPLING_BATCH_SIZE = 0  # Batchsize for patch during training, 0=full con
 SHARE_WEIGHTS = False  # Whether to share weights between the encoder and decoder
 
 
-def download(filename: str, url: str):
-    try:
-        response = requests.get(url, stream=True)
-        total_size = int(response.headers.get("content-length", 0))
-        chunk_size = 1024
-        with open(filename, "wb") as file, tqdm(
-            desc=f"Downloading {filename} from '{url}'...",
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar:
-            for data in response.iter_content(chunk_size=chunk_size):
-                size = file.write(data)
-                bar.update(size)
-
-    except Exception as e:
-        print(f"Error: {e}, retrying...")
-        time.sleep(10)
-        download(filename, url)
-
-
 if sys.platform.startswith("linux"):
     apkname = "MuseScore.AppImage"
+    shutil.move(f"{MODEL_DIR}/{apkname}", "./")
     extra_dir = "squashfs-root"
-    download(
-        filename=apkname,
-        url="https://www.modelscope.cn/studio/Genius-Society/piano_trans/resolve/master/MuseScore.AppImage",
-    )
     if not os.path.exists(extra_dir):
         subprocess.run(["chmod", "+x", f"./{apkname}"])
         subprocess.run([f"./{apkname}", "--appimage-extract"])

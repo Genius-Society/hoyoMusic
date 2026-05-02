@@ -240,9 +240,6 @@ if __name__ == "__main__":
         flagging_mode="never",
         title=_L("原神音乐生成"),
         description=_L(
-            """
-    欢迎使用此创空间, 此创空间基于 Tunesformer 开源项目制作，完全免费。当前模型还在调试中，计划在原神主线杀青后，所有国家地区角色全部开放后，二创音乐会齐全且样本均衡，届时重新微调模型并添加现实风格筛选辅助游戏各国家输出强化学习，以提升输出区分度与质量。注：崩铁方面数据工程正在运作中，未来也希望随主线杀青而基线化。<br>
-    数据来源: <a href="https://musescore.org">MuseScore</a> 标签来源: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> 模型基础: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>
-    """
+            """欢迎使用此创空间, 此创空间基于 Tunesformer 开源项目制作，完全免费。当前模型还在调试中，计划在原神主线杀青后，所有国家地区角色全部开放后，二创音乐会齐全且样本均衡，届时重新微调模型并添加现实风格筛选辅助游戏各国家输出强化学习，以提升输出区分度与质量。注：崩铁方面数据工程正在运作中，未来也希望随主线杀青而基线化。<br>数据来源: <a href="https://musescore.org">MuseScore</a> 标签来源: <a href="https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki">Genshin Impact Wiki | Fandom</a> 模型基础: <a href="https://github.com/sander-wood/tunesformer">Tunesformer</a>"""
         ),
     ).launch(css="#gradio-share-link-button-0 { display: none; }", ssr_mode=False)
