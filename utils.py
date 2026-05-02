@@ -66,7 +66,7 @@ SHARE_WEIGHTS = False  # Whether to share weights between the encoder and decode
 
 if sys.platform.startswith("linux"):
     apkname = "MuseScore.AppImage"
-    shutil.move(f"{MODEL_DIR}/{apkname}", "./")
+    shutil.move(os.path.realpath(f"{MODEL_DIR}/{apkname}"), f"./{apkname}")
     extra_dir = "squashfs-root"
     if not os.path.exists(extra_dir):
         subprocess.run(["chmod", "+x", f"./{apkname}"])
