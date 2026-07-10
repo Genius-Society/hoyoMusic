@@ -24,10 +24,6 @@ ZH2EN = {
 }
 
 
-def _L(zh_txt: str):
-    return ZH2EN[zh_txt] if EN_US else zh_txt
-
-
 TEYVAT = {
     "蒙德": "Mondstadt",
     "璃月": "Liyue",
@@ -36,6 +32,13 @@ TEYVAT = {
     "枫丹": "Fontaine",
     "纳塔": "Teyvat",  # Coming soon
 }
+
+ZH2EN.update(TEYVAT)
+
+
+def _L(zh_txt: str):
+    return ZH2EN[zh_txt] if EN_US else zh_txt
+
 
 if EN_US:
     import huggingface_hub
