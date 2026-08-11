@@ -21,6 +21,7 @@ from utils import (
     DEVICE,
     EN_US,
     _L,
+    ZERO,
 )
 
 
@@ -65,6 +66,7 @@ def get_args(parser: argparse.ArgumentParser):
     return parser.parse_args()
 
 
+@ZERO
 def generate_music(args, region: str):
     patchilizer = Patchilizer()
     patch_config = GPT2Config(

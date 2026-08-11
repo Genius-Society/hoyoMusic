@@ -41,8 +41,10 @@ def _L(zh_txt: str):
 
 
 if EN_US:
+    import spaces
     import huggingface_hub
 
+    ZERO = spaces.GPU
     MODEL_DIR = huggingface_hub.snapshot_download(
         "Genius-Society/hoyoMusic",
         cache_dir="./__pycache__",
@@ -55,6 +57,10 @@ else:
         "Genius-Society/hoyoMusic",
         cache_dir="./__pycache__",
     )
+
+    def ZERO(fn):
+        return fn
+
 
 WEIGHTS_PATH = f"{MODEL_DIR}/weights.pth"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
