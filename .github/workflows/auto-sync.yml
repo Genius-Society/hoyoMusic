@@ -85,7 +85,7 @@ jobs:
         run: |
           wget --header="Authorization: token $GIT_TOKEN" -P ../ $BASE_URL/update.py
           pip install huggingface_hub
-          python ../update.py --token $HF_TOKEN
+          python ../update.py --token $HF_TOKEN --repo kakmond/hoyoMusic
           last_commit_ts=$(git log -1 --format=%ct 2>/dev/null)
           now_ts=$(date +%s)
           diff_days=$(((now_ts - last_commit_ts) / 86400))
